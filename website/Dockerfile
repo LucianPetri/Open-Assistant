@@ -1,25 +1,25 @@
 # Install dependencies only when needed
-FROM node:18 AS deps
+FROM --platform=linux/amd64 node:18-slim as deps
 WORKDIR /app
 
 # Install dependencies based on the preferred package manager
-COPY ./website/package.json ./website/package-lock.json ./
+COPY ./package.json ./package-lock.json ./
 RUN \
   if [ -f package-lock.json ]; then npm ci; \
   else echo "Lockfile not found." && exit 1; \
   fi
 
 # Rebuild the source code only when needed
-FROM node:18 AS builder
+FROM --platform=linux/amd64 node:18-slim as builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY ./website/ .
+COPY ./ .
 
 RUN npx prisma generate
 RUN npm run build
 
 # Production image, copy all the files and run next
-FROM node:18 AS runner
+FROM --platform=linux/amd64 node:18-slim as runner
 WORKDIR /app
 
 ENV NODE_ENV production
@@ -29,17 +29,7 @@ RUN adduser --system --uid 1001 nextjs
 
 COPY --from=builder /app/public ./public
 
-# Copy over the prisma schema so we can to `npx prisma db push` and ensure the
-# database exists on startup.
-COPY --chown=nextjs:nodejs ./website/prisma/schema.prisma ./
-# Copy over a startup script that'll run `npx prisma db push` before starting
-# the webserver.  This ensures the webserver can actually check user accounts.
-# This is a prisma variant of the postgres solution suggested in
-#   https://docs.docker.com/compose/startup-order/
-COPY --chown=nextjs:nodejs ./website/wait-for-postgres.sh ./
-
-# Automatically leverage output traces to reduce image size
-# https://nextjs.org/docs/advanced-features/output-file-tracing
+COPY --from=builder --chown=nextjs:nodejs /app/prisma/schema.prisma ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
